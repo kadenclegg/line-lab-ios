@@ -52,7 +52,7 @@ jobs:
         run: |
           xcodebuild -project ios/App/App.xcodeproj -scheme App \
             -configuration Release -archivePath build/LineLab.xcarchive archive \
-            CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=MCB9CXC9DV
+            CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=MCB9CXC9DV PROVISIONING_PROFILE_SPECIFIER="LIne Lab App Store"
       - name: Export IPA
         run: |
           cat > ExportOptions.plist <<EOF
