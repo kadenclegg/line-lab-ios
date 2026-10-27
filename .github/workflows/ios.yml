@@ -1,0 +1,79 @@
+# DRAFT — Line Lab iOS build + TestFlight upload (GitHub Actions, macOS runner).
+# NOT runnable until: (1) the project lives in a GitHub repo, (2) Apple Developer
+# enrollment is active, (3) the secrets below exist in the repo. It is intentionally
+# untested on this Linux host — first real run happens on the macOS runner.
+#
+# Secrets to add in the repo (Settings > Secrets and variables > Actions) after enrollment:
+#   IOS_CERTIFICATE_P12         Base64 of the .p12 distribution certificate
+#   IOS_CERTIFICATE_PASSWORD    Password for that .p12
+#   IOS_PROVISIONING_PROFILE    Base64 of the App Store provisioning profile for com.kadenclegg.linelab
+#   APP_STORE_CONNECT_API_KEY_P8   Base64 of the App Store Connect API key (.p8)
+#   API_KEY_ID                  The API key's Key ID
+#   API_ISSUER_ID               The API key's Issuer ID
+#
+# Manual trigger only (workflow_dispatch) so no build runs by accident.
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Sync web assets into the iOS project
+        run: npx cap sync ios
+      - name: Install signing certificate and profile
+        env:
+          CERT_P12: ${{ secrets.IOS_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+        run: |
+          CERT_PATH=$RUNNER_TEMP/cert.p12
+          PROFILE_PATH=$RUNNER_TEMP/profile.mobileprovision
+          echo "$CERT_P12" | base64 --decode > "$CERT_PATH"
+          echo "$PROFILE" | base64 --decode > "$PROFILE_PATH"
+          KEYCHAIN=$RUNNER_TEMP/build.keychain
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          security import "$CERT_PATH" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN"
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp "$PROFILE_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/
+      - name: Archive
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj -scheme App \
+            -configuration Release -archivePath build/LineLab.xcarchive archive \
+            CODE_SIGN_STYLE=Manual
+      - name: Export IPA
+        run: |
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>uploadSymbols</key><true/>
+            <key>uploadBitcode</key><false/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive -archivePath build/LineLab.xcarchive \
+            -exportPath build -exportOptionsPlist ExportOptions.plist
+      - name: Upload to TestFlight
+        env:
+          API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          API_KEY_ID: ${{ secrets.API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.API_ISSUER_ID }}
+        run: |
+          echo "$API_KEY_P8" | base64 --decode > $RUNNER_TEMP/AuthKey.p8
+          xcrun altool --upload-app -f build/*.ipa -t ios \
+            --apiKey "$API_KEY_ID" --apiIssuer "$API_ISSUER_ID"
