@@ -80,6 +80,7 @@ jobs:
           API_KEY_ID: ${{ secrets.API_KEY_ID }}
           API_ISSUER_ID: ${{ secrets.API_ISSUER_ID }}
         run: |
-          echo "$API_KEY_P8" | base64 --decode > $RUNNER_TEMP/AuthKey.p8
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$API_KEY_P8" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_$API_KEY_ID.p8
           xcrun altool --upload-app -f build/*.ipa -t ios \
             --apiKey "$API_KEY_ID" --apiIssuer "$API_ISSUER_ID"
